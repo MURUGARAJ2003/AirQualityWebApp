@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ESP32 Air Quality Monitor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Air Quality Monitoring Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script type="module">
     // Import Firebase SDK
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -28,60 +30,484 @@
     const tempRef = ref(db, "AirQuality/Temperature");
     const humRef = ref(db, "AirQuality/Humidity");
 
+    // Historical data arrays
+    const gasHistory = [];
+    const tempHistory = [];
+    const humHistory = [];
+    const timeHistory = [];
+
+    // Initialize charts
+    let gasChart, tempChart, humChart;
+
+    function initializeCharts() {
+      const ctxGas = document.getElementById('gasChart').getContext('2d');
+      gasChart = new Chart(ctxGas, {
+        type: 'line',
+        data: {
+          labels: timeHistory,
+          datasets: [{
+            label: 'Gas Level',
+            data: gasHistory,
+            borderColor: '#FF6384',
+            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+            borderWidth: 2,
+            tension: 0.4,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: {
+              position: 'top',
+            },
+            title: {
+              display: true,
+              text: 'Gas Level Over Time'
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
+      });
+
+      const ctxTemp = document.getElementById('tempChart').getContext('2d');
+      tempChart = new Chart(ctxTemp, {
+        type: 'line',
+        data: {
+          labels: timeHistory,
+          datasets: [{
+            label: 'Temperature (°C)',
+            data: tempHistory,
+            borderColor: '#36A2EB',
+            backgroundColor: 'rgba(54, 162, 235, 0.1)',
+            borderWidth: 2,
+            tension: 0.4,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: {
+              position: 'top',
+            },
+            title: {
+              display: true,
+              text: 'Temperature Over Time'
+            }
+          }
+        }
+      });
+
+      const ctxHum = document.getElementById('humChart').getContext('2d');
+      humChart = new Chart(ctxHum, {
+        type: 'line',
+        data: {
+          labels: timeHistory,
+          datasets: [{
+            label: 'Humidity (%)',
+            data: humHistory,
+            borderColor: '#4BC0C0',
+            backgroundColor: 'rgba(75, 192, 192, 0.1)',
+            borderWidth: 2,
+            tension: 0.4,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: {
+              position: 'top',
+            },
+            title: {
+              display: true,
+              text: 'Humidity Over Time'
+            }
+          },
+          scales: {
+            y: {
+              min: 0,
+              max: 100
+            }
+          }
+        }
+      });
+    }
+
+    // Update charts with new data
+    function updateCharts() {
+      if (gasChart && tempChart && humChart) {
+        gasChart.update();
+        tempChart.update();
+        humChart.update();
+      }
+    }
+
+    // Function to get status based on values
+    function getGasStatus(value) {
+      if (value < 100) return {text: 'Good', color: '#27ae60'};
+      if (value < 300) return {text: 'Moderate', color: '#f39c12'};
+      return {text: 'Poor', color: '#e74c3c'};
+    }
+
+    function getTempStatus(value) {
+      if (value >= 18 && value <= 26) return {text: 'Comfortable', color: '#27ae60'};
+      if (value >= 15 && value <= 30) return {text: 'Acceptable', color: '#f39c12'};
+      return {text: 'Uncomfortable', color: '#e74c3c'};
+    }
+
+    function getHumStatus(value) {
+      if (value >= 30 && value <= 60) return {text: 'Ideal', color: '#27ae60'};
+      if (value >= 20 && value <= 70) return {text: 'Acceptable', color: '#f39c12'};
+      return {text: 'Poor', color: '#e74c3c'};
+    }
+
+    // Update time function
+    function updateTime() {
+      const now = new Date();
+      document.getElementById('currentTime').innerText = now.toLocaleString();
+    }
+
+    // Initialize charts when DOM is loaded
+    document.addEventListener('DOMContentLoaded', function() {
+      initializeCharts();
+      updateTime();
+      setInterval(updateTime, 1000);
+    });
+
     // Listen for realtime updates
     onValue(gasRef, (snapshot) => {
-      document.getElementById("gasValue").innerText = snapshot.val();
+      const value = snapshot.val();
+      document.getElementById("gasValue").innerText = value;
+      
+      // Update status
+      const gasStatus = getGasStatus(value);
+      document.getElementById("gasStatus").innerText = gasStatus.text;
+      document.getElementById("gasStatus").style.color = gasStatus.color;
+      
+      // Update history
+      const now = new Date();
+      const timeString = now.toLocaleTimeString();
+      
+      if (timeHistory.length >= 10) {
+        timeHistory.shift();
+        gasHistory.shift();
+      }
+      
+      timeHistory.push(timeString);
+      gasHistory.push(value);
+      
+      updateCharts();
     });
 
     onValue(tempRef, (snapshot) => {
-      document.getElementById("tempValue").innerText = snapshot.val() + " °C";
+      const value = snapshot.val();
+      document.getElementById("tempValue").innerText = value + " °C";
+      
+      // Update status
+      const tempStatus = getTempStatus(value);
+      document.getElementById("tempStatus").innerText = tempStatus.text;
+      document.getElementById("tempStatus").style.color = tempStatus.color;
+      
+      // Update history
+      if (tempHistory.length >= 10) {
+        tempHistory.shift();
+      }
+      tempHistory.push(value);
+      
+      updateCharts();
     });
 
     onValue(humRef, (snapshot) => {
-      document.getElementById("humValue").innerText = snapshot.val() + " %";
+      const value = snapshot.val();
+      document.getElementById("humValue").innerText = value + " %";
+      
+      // Update status
+      const humStatus = getHumStatus(value);
+      document.getElementById("humStatus").innerText = humStatus.text;
+      document.getElementById("humStatus").style.color = humStatus.color;
+      
+      // Update history
+      if (humHistory.length >= 10) {
+        humHistory.shift();
+      }
+      humHistory.push(value);
+      
+      updateCharts();
     });
   </script>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      background: #f0f2f5;
+    :root {
+      --primary-color: #3498db;
+      --secondary-color: #2c3e50;
+      --success-color: #27ae60;
+      --warning-color: #f39c12;
+      --danger-color: #e74c3c;
+      --light-bg: #f8f9fa;
+      --card-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    }
+
+    * {
       margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    body {
+      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+      color: #333;
+      min-height: 100vh;
       padding: 20px;
     }
+
+    .dashboard {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 30px;
+      padding: 20px;
+      background: white;
+      border-radius: 15px;
+      box-shadow: var(--card-shadow);
+    }
+
     h1 {
-      color: #2c3e50;
+      color: var(--secondary-color);
+      margin-bottom: 10px;
+      font-size: 2.5rem;
     }
-    .card {
-      display: inline-block;
-      background: #fff;
-      border-radius: 12px;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-      padding: 20px;
-      margin: 15px;
-      width: 200px;
+
+    .subtitle {
+      color: #7f8c8d;
+      font-size: 1.1rem;
     }
-    .value {
-      font-size: 24px;
-      font-weight: bold;
+
+    .current-time {
       margin-top: 10px;
-      color: #27ae60;
+      font-size: 1rem;
+      color: #95a5a6;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .metric-card {
+      background: white;
+      border-radius: 15px;
+      padding: 25px;
+      box-shadow: var(--card-shadow);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .metric-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 15px 30px rgba(0,0,0,0.15);
+    }
+
+    .metric-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+
+    .metric-title {
+      font-size: 1.2rem;
+      color: var(--secondary-color);
+      font-weight: 600;
+    }
+
+    .metric-status {
+      font-size: 0.9rem;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 20px;
+      background-color: rgba(39, 174, 96, 0.1);
+    }
+
+    .metric-value {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin: 10px 0;
+      color: var(--primary-color);
+    }
+
+    .metric-icon {
+      font-size: 2rem;
+      margin-bottom: 10px;
+    }
+
+    .charts-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .chart-card {
+      background: white;
+      border-radius: 15px;
+      padding: 20px;
+      box-shadow: var(--card-shadow);
+    }
+
+    .chart-title {
+      font-size: 1.2rem;
+      margin-bottom: 15px;
+      color: var(--secondary-color);
+      text-align: center;
+      font-weight: 600;
+    }
+
+    .history-section {
+      background: white;
+      border-radius: 15px;
+      padding: 25px;
+      box-shadow: var(--card-shadow);
+      margin-bottom: 30px;
+    }
+
+    .section-title {
+      font-size: 1.5rem;
+      margin-bottom: 20px;
+      color: var(--secondary-color);
+      border-bottom: 2px solid var(--light-bg);
+      padding-bottom: 10px;
+    }
+
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .history-table th, .history-table td {
+      padding: 12px 15px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+
+    .history-table th {
+      background-color: var(--light-bg);
+      color: var(--secondary-color);
+      font-weight: 600;
+    }
+
+    .history-table tr:hover {
+      background-color: #f5f5f5;
+    }
+
+    footer {
+      text-align: center;
+      padding: 20px;
+      color: #7f8c8d;
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 768px) {
+      .metrics-grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .charts-container {
+        grid-template-columns: 1fr;
+      }
+      
+      h1 {
+        font-size: 2rem;
+      }
     }
   </style>
 </head>
 <body>
-  <h1>🌍 ESP32 Air Quality System</h1>
-  <div class="card">
-    <h3>Gas Level</h3>
-    <div class="value" id="gasValue">--</div>
-  </div>
-  <div class="card">
-    <h3>Temperature</h3>
-    <div class="value" id="tempValue">--</div>
-  </div>
-  <div class="card">
-    <h3>Humidity</h3>
-    <div class="value" id="humValue">--</div>
+  <div class="dashboard">
+    <header>
+      <h1>🌍 Air Quality Monitoring System</h1>
+      <p class="subtitle">Real-time environmental data from ESP32 sensors</p>
+      <p class="current-time">Last Updated: <span id="currentTime">--</span></p>
+    </header>
+
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-header">
+          <div class="metric-title">Gas Level</div>
+          <div class="metric-status" id="gasStatus">--</div>
+        </div>
+        <div class="metric-icon">💨</div>
+        <div class="metric-value" id="gasValue">--</div>
+        <div class="metric-description">Air pollutant concentration</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-header">
+          <div class="metric-title">Temperature</div>
+          <div class="metric-status" id="tempStatus">--</div>
+        </div>
+        <div class="metric-icon">🌡️</div>
+        <div class="metric-value" id="tempValue">--</div>
+        <div class="metric-description">Ambient temperature</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-header">
+          <div class="metric-title">Humidity</div>
+          <div class="metric-status" id="humStatus">--</div>
+        </div>
+        <div class="metric-icon">💧</div>
+        <div class="metric-value" id="humValue">--</div>
+        <div class="metric-description">Relative humidity level</div>
+      </div>
+    </div>
+
+    <div class="charts-container">
+      <div class="chart-card">
+        <div class="chart-title">Gas Level Over Time</div>
+        <canvas id="gasChart"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Temperature Over Time</div>
+        <canvas id="tempChart"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Humidity Over Time</div>
+        <canvas id="humChart"></canvas>
+      </div>
+    </div>
+
+    <div class="history-section">
+      <h2 class="section-title">Data History</h2>
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Gas Level</th>
+            <th>Temperature</th>
+            <th>Humidity</th>
+          </tr>
+        </thead>
+        <tbody id="historyData">
+          <tr>
+            <td colspan="4" style="text-align: center;">Waiting for data...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <footer>
+      <p>ESP32 Air Quality Monitoring System &copy; 2023</p>
+    </footer>
   </div>
 </body>
 </html>
