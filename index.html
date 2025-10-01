@@ -8,7 +8,7 @@
   <script type="module">
     // Import Firebase SDK
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+    import { getDatabase, ref, onValue, push, set, get, child } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
     // Your Firebase configuration
     const firebaseConfig = {
@@ -25,20 +25,40 @@
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
 
-    // References
+    // References for real-time data
     const gasRef = ref(db, "AirQuality/Gas");
     const tempRef = ref(db, "AirQuality/Temperature");
     const humRef = ref(db, "AirQuality/Humidity");
+    
+    // References for historical data storage
+    const historyRef = ref(db, "AirQuality/History");
+
+    // Current readings
+    let currentGas = null;
+    let currentTemp = null;
+    let currentHum = null;
 
     // Historical data arrays
-    const gasHistory = [];
-    const tempHistory = [];
-    const humHistory = [];
-    const timeHistory = [];
+    let gasHistory = [];
+    let tempHistory = [];
+    let humHistory = [];
+    let timeHistory = [];
 
     // Initialize charts
     let gasChart, tempChart, humChart;
 
+    // Initialize the dashboard
+    document.addEventListener('DOMContentLoaded', function() {
+      initializeCharts();
+      updateTime();
+      setInterval(updateTime, 1000);
+      loadHistoricalData();
+      
+      // Set up periodic data storage (every 5 minutes)
+      setInterval(storeCurrentData, 300000);
+    });
+
+    // Initialize charts
     function initializeCharts() {
       const ctxGas = document.getElementById('gasChart').getContext('2d');
       gasChart = new Chart(ctxGas, {
@@ -148,6 +168,93 @@
       }
     }
 
+    // Load historical data from Firebase
+    function loadHistoricalData() {
+      get(historyRef).then((snapshot) => {
+        if (snapshot.exists()) {
+          const historyData = snapshot.val();
+          gasHistory = [];
+          tempHistory = [];
+          humHistory = [];
+          timeHistory = [];
+          
+          // Convert object to array and sort by timestamp
+          const dataArray = Object.values(historyData).sort((a, b) => a.timestamp - b.timestamp);
+          
+          // Get the most recent 50 readings
+          const recentData = dataArray.slice(-50);
+          
+          recentData.forEach(entry => {
+            gasHistory.push(entry.gas);
+            tempHistory.push(entry.temp);
+            humHistory.push(entry.hum);
+            timeHistory.push(new Date(entry.timestamp).toLocaleTimeString());
+          });
+          
+          // Update charts with historical data
+          updateCharts();
+          updateHistoryTable();
+        }
+      }).catch((error) => {
+        console.error("Error loading historical data:", error);
+      });
+    }
+
+    // Store current data to Firebase
+    function storeCurrentData() {
+      if (currentGas !== null && currentTemp !== null && currentHum !== null) {
+        const timestamp = Date.now();
+        const newDataRef = push(historyRef);
+        set(newDataRef, {
+          gas: currentGas,
+          temp: currentTemp,
+          hum: currentHum,
+          timestamp: timestamp
+        }).then(() => {
+          console.log("Data stored successfully");
+          
+          // Update local history arrays (keep only last 50 entries)
+          if (timeHistory.length >= 50) {
+            timeHistory.shift();
+            gasHistory.shift();
+            tempHistory.shift();
+            humHistory.shift();
+          }
+          
+          timeHistory.push(new Date(timestamp).toLocaleTimeString());
+          gasHistory.push(currentGas);
+          tempHistory.push(currentTemp);
+          humHistory.push(currentHum);
+          
+          // Update charts and table
+          updateCharts();
+          updateHistoryTable();
+        }).catch((error) => {
+          console.error("Error storing data:", error);
+        });
+      }
+    }
+
+    // Update history table
+    function updateHistoryTable() {
+      const tableBody = document.getElementById('historyData');
+      tableBody.innerHTML = '';
+      
+      // Show the 10 most recent entries
+      const startIndex = Math.max(0, timeHistory.length - 10);
+      
+      for (let i = startIndex; i < timeHistory.length; i++) {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${timeHistory[i]}</td>
+          <td>${gasHistory[i]}</td>
+          <td>${tempHistory[i]} °C</td>
+          <td>${humHistory[i]} %</td>
+        `;
+        tableBody.appendChild(row);
+      }
+    }
+
     // Function to get status based on values
     function getGasStatus(value) {
       if (value < 100) return {text: 'Good', color: '#27ae60'};
@@ -173,73 +280,50 @@
       document.getElementById('currentTime').innerText = now.toLocaleString();
     }
 
-    // Initialize charts when DOM is loaded
-    document.addEventListener('DOMContentLoaded', function() {
-      initializeCharts();
-      updateTime();
-      setInterval(updateTime, 1000);
-    });
-
     // Listen for realtime updates
     onValue(gasRef, (snapshot) => {
-      const value = snapshot.val();
-      document.getElementById("gasValue").innerText = value;
+      currentGas = snapshot.val();
+      document.getElementById("gasValue").innerText = currentGas;
       
       // Update status
-      const gasStatus = getGasStatus(value);
+      const gasStatus = getGasStatus(currentGas);
       document.getElementById("gasStatus").innerText = gasStatus.text;
       document.getElementById("gasStatus").style.color = gasStatus.color;
-      
-      // Update history
-      const now = new Date();
-      const timeString = now.toLocaleTimeString();
-      
-      if (timeHistory.length >= 10) {
-        timeHistory.shift();
-        gasHistory.shift();
-      }
-      
-      timeHistory.push(timeString);
-      gasHistory.push(value);
-      
-      updateCharts();
     });
 
     onValue(tempRef, (snapshot) => {
-      const value = snapshot.val();
-      document.getElementById("tempValue").innerText = value + " °C";
+      currentTemp = snapshot.val();
+      document.getElementById("tempValue").innerText = currentTemp + " °C";
       
       // Update status
-      const tempStatus = getTempStatus(value);
+      const tempStatus = getTempStatus(currentTemp);
       document.getElementById("tempStatus").innerText = tempStatus.text;
       document.getElementById("tempStatus").style.color = tempStatus.color;
-      
-      // Update history
-      if (tempHistory.length >= 10) {
-        tempHistory.shift();
-      }
-      tempHistory.push(value);
-      
-      updateCharts();
     });
 
     onValue(humRef, (snapshot) => {
-      const value = snapshot.val();
-      document.getElementById("humValue").innerText = value + " %";
+      currentHum = snapshot.val();
+      document.getElementById("humValue").innerText = currentHum + " %";
       
       // Update status
-      const humStatus = getHumStatus(value);
+      const humStatus = getHumStatus(currentHum);
       document.getElementById("humStatus").innerText = humStatus.text;
       document.getElementById("humStatus").style.color = humStatus.color;
-      
-      // Update history
-      if (humHistory.length >= 10) {
-        humHistory.shift();
-      }
-      humHistory.push(value);
-      
-      updateCharts();
     });
+
+    // Manual data storage function
+    window.storeDataManually = function() {
+      storeCurrentData();
+      // Show confirmation
+      const button = document.getElementById('storeDataBtn');
+      const originalText = button.innerHTML;
+      button.innerHTML = '✓ Data Stored!';
+      button.style.backgroundColor = '#27ae60';
+      setTimeout(() => {
+        button.innerHTML = originalText;
+        button.style.backgroundColor = '';
+      }, 2000);
+    };
   </script>
   <style>
     :root {
@@ -380,12 +464,33 @@
       margin-bottom: 30px;
     }
 
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
     .section-title {
       font-size: 1.5rem;
-      margin-bottom: 20px;
       color: var(--secondary-color);
       border-bottom: 2px solid var(--light-bg);
       padding-bottom: 10px;
+    }
+
+    .btn {
+      background: var(--primary-color);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background 0.3s ease;
+    }
+
+    .btn:hover {
+      background: #2980b9;
     }
 
     .history-table {
@@ -428,6 +533,15 @@
       h1 {
         font-size: 2rem;
       }
+      
+      .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      
+      .btn {
+        margin-top: 10px;
+      }
     }
   </style>
 </head>
@@ -435,7 +549,7 @@
   <div class="dashboard">
     <header>
       <h1>🌍 Air Quality Monitoring System</h1>
-      <p class="subtitle">Real-time environmental data from ESP32 sensors</p>
+      <p class="subtitle">Real-time environmental data from ESP32 sensors with historical storage</p>
       <p class="current-time">Last Updated: <span id="currentTime">--</span></p>
     </header>
 
@@ -487,7 +601,10 @@
     </div>
 
     <div class="history-section">
-      <h2 class="section-title">Data History</h2>
+      <div class="section-header">
+        <h2 class="section-title">Data History</h2>
+        <button class="btn" id="storeDataBtn" onclick="storeDataManually()">Store Current Data</button>
+      </div>
       <table class="history-table">
         <thead>
           <tr>
@@ -499,14 +616,14 @@
         </thead>
         <tbody id="historyData">
           <tr>
-            <td colspan="4" style="text-align: center;">Waiting for data...</td>
+            <td colspan="4" style="text-align: center;">Loading historical data...</td>
           </tr>
         </tbody>
       </table>
     </div>
 
     <footer>
-      <p>ESP32 Air Quality Monitoring System &copy; 2023</p>
+      <p>ESP32 Air Quality Monitoring System &copy; 2023 | All data is stored in Firebase</p>
     </footer>
   </div>
 </body>
